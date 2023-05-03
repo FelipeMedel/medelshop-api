@@ -4,9 +4,9 @@ import { BadRequestException, InternalServerErrorException, NotFoundException } 
 import { Repository } from 'typeorm'
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { Product } from './entities/product.entity';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 import { validate as isUUID } from 'uuid';
+import { Product, ProductImage } from './entities';
 
 @Injectable()
 export class ProductsService {
@@ -15,14 +15,22 @@ export class ProductsService {
 
   constructor(
     @InjectRepository(Product)
-    private readonly productRepository: Repository<Product>
+    private readonly productRepository: Repository<Product>,
+
+    @InjectRepository(ProductImage)
+    private readonly productImageRepository: Repository<ProductImage>
   ) {}
 
   async create(createProductDto: CreateProductDto) {
     try {
-      const newProduct = this.productRepository.create(createProductDto)
+      const {images = [], ...productDetails} = createProductDto
+
+      const newProduct = this.productRepository.create({
+        ...productDetails,
+        images: images.map(image => this.productImageRepository.create({url: image}))
+      })
       await this.productRepository.save(newProduct)
-      return newProduct
+      return {...newProduct, images: images}
     } catch (error) {
       this.handleDBExceptions(error)
     }
@@ -53,8 +61,21 @@ export class ProductsService {
     return product
   }
 
-  update(id: number, updateProductDto: UpdateProductDto) {
-    return `This action updates a #${id} product`;
+  async update(id: string, updateProductDto: UpdateProductDto) {
+    const product = await this.productRepository.preload({
+      id: id,
+      ...updateProductDto,
+      images: []
+    })
+
+    if (!product) throw new NotFoundException(`Product with id: ${id} not found`)
+    try {
+      await this.productRepository.save(product)
+    } catch(error){
+      this.handleDBExceptions(error)
+    }
+
+    return product
   }
 
   async remove(id: string) {
